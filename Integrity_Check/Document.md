@@ -27,6 +27,7 @@ It performs the following tasks:
 └── fim_monitor2.py             # Main script
 
 ```
+---
 
 ## 3. Working
 
@@ -80,7 +81,11 @@ It performs the following tasks:
 
 ![Output](./output2.png)
 
+---
+
 ## 4. Summary
 
 This project implements a simple File Integrity Monitoring (FIM) system using Python.  
 The script continuously scans a specified folder, calculates SHA-256 hash values for all files, and compares them with previously stored hashes to detect any changes. It identifies added, modified, deleted, and renamed files, then logs these events in a JSON log file. All hash values are stored in a separate JSON database for future comparison. The script runs in a loop, performing integrity checks every 20 seconds, and includes robust error handling to ensure stable operation.
+
+---
