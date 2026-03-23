@@ -5,6 +5,9 @@ from datetime import datetime
 import time
 import requests
 import base64
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,6 +22,9 @@ JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 JIRA_URL = os.getenv("JIRA_URL")
 JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY")
 
+SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 
 # Add validation
 if not JIRA_EMAIL or not JIRA_API_TOKEN:
@@ -81,6 +87,32 @@ def determine_priority(changes, alerts):
         return "Low"
     return "Lowest"
 
+def send_email_alert(alerts, priority):
+    if not SENDER_EMAIL or not APP_PASSWORD or not RECEIVER_EMAIL:
+        print("[EMAIL WARNING] Email credentials not set.")
+        return
+
+    subject = f"[FIM ALERT] Priority: {priority}"
+    body = "\n\n".join(alerts)
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = RECEIVER_EMAIL
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(SENDER_EMAIL, APP_PASSWORD)
+        server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
+        server.quit()
+
+        print("[EMAIL] Alert sent successfully")
+
+    except Exception as e:
+        print("[EMAIL ERROR]", e)
+
 def build_clean_jira_payload(alerts):
     description = " \n \n".join(alerts)
 
@@ -106,6 +138,26 @@ def prepare_jira_payload(alerts, changes):
     priority = determine_priority(changes, alerts)
 
     content = []
+
+    # ADD PRIORITY TO DESCRIPTION
+    content.append({
+        "type": "paragraph",
+        "content": [
+            {
+                "type": "text",
+                "text": f"Priority: {priority}",
+                "marks": [{"type": "strong"}]
+            }
+        ]
+    })
+
+    # Separator line
+    content.append({
+        "type": "paragraph",
+        "content": [{"type": "text", "text": "-----------------------------------"}]
+    })
+
+    # Existing alerts
     for alert in alerts:
         content.append({
             "type": "paragraph",
@@ -125,6 +177,7 @@ def prepare_jira_payload(alerts, changes):
             }
         }
     }
+
 
 
 def create_jira_ticket(alerts, changes):
@@ -162,11 +215,9 @@ def trigger_alert(changes, old_hashes):
         new_hash = calculate_sha256(path)
         new_meta = get_file_metadata(path)
 
-        alerts.append(
-            f"File Modified: {f}\n"
-            f"Old Hash: {old_hash}\n"
-            f"New Hash: {new_hash}"
-        )
+        # Hash change
+
+        alerts.append(f"Hash Changed: {f} {old_hash} → {new_hash}")
 
         if old_meta.get("permissions") != new_meta["permissions"]:
             alerts.append(
@@ -181,7 +232,10 @@ def trigger_alert(changes, old_hashes):
             )
 
         if old_meta.get("mtime") != new_meta["mtime"]:
-            alerts.append(f"Timestamp Changed (mtime): {f}")
+            old_time = datetime.fromtimestamp(old_meta.get("mtime")).strftime("%Y-%m-%d %H:%M:%S")
+            new_time = datetime.fromtimestamp(new_meta["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+            alerts.append(f"Timestamp Changed (mtime): {f} {old_time} → {new_time}")
+
 
     for f in changes["deleted"]:
         alerts.append(
@@ -189,8 +243,13 @@ def trigger_alert(changes, old_hashes):
         )
 
     if alerts:
+
+        priority = determine_priority(changes, alerts)
+
         for a in alerts:
             print("[ALERT]", a)
+
+        send_email_alert(alerts, priority)
 
         clean_payload = build_clean_jira_payload(alerts)
         save_clean_jira_payload(clean_payload)
